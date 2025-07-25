@@ -1,134 +1,183 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS # Flask-CORS library ko import karein
+from flask_cors import CORS
+import json
+import os
 
 app = Flask(__name__)
-
-# CORS ko configure karein
-# Yeh sabhi origins se requests ki ijazat dega.
-# Development ke liye yeh theek hai. Production mein, aapko specific origins set karne chahiye.
-# Misal ke taur par:
-# CORS(app, resources={r"/*": {"origins": ["https://frontend-henna-nine-34.vercel.app", "http://localhost:5173"]}})
-# Jahan "https://frontend-henna-nine-34.vercel.app" aapki Vercel frontend app ka URL hai.
-# "http://localhost:5173" local development ke liye hai.
 CORS(app)
 
-# Dummy data store karne ke liye (real database ki jagah)
-# Production mein aapko MongoDB, PostgreSQL, ya koi aur database use karna hoga.
-clients_db = {}
-# =============================================================================
-# Yahan invoices_db mein abhi dummy data hai.
-# Isko theek karne ke liye, aapko asal mein invoices ko database mein save karna hoga.
-# =============================================================================
-invoices_db = [
-    {"invoice_no": "INV-01", "customer_name": "Al Flex Art", "date": "2025-07-22", "total_amount": "4687.50", "remaining_amount": "687.50"},
-    {"invoice_no": "INV-02", "customer_name": "Client B", "date": "2025-07-20", "total_amount": "1000.00", "remaining_amount": "0.00"},
-    {"invoice_no": "INV-03", "customer_name": "Client A", "date": "2025-07-18", "total_amount": "2500.00", "remaining_amount": "500.00"}
-]
+INVOICE_FILE = 'invoices.json'
+CLIENT_FILE = 'clients.json'
 
-# =============================================================================
-# Client Management Routes (Jaisa pehle tha)
-# =============================================================================
+# 🔧 Ensure files exist
+for file in [INVOICE_FILE, CLIENT_FILE]:
+    if not os.path.exists(file):
+        with open(file, 'w', encoding='utf-8') as f:
+            json.dump([], f)
 
-@app.route('/clients', methods=['GET'])
-def get_clients():
-    """
-    Saare clients ki list return karta hai.
-    """
-    return jsonify(list(clients_db.values()))
+# --- Helper to load and save data ---
+def load_data(filename):
+    if os.path.exists(filename):
+        with open(filename, 'r', encoding='utf-8') as f:
+            try:
+                content = f.read()
+                if content:
+                    return json.loads(content)
+                return []
+            except json.JSONDecodeError:
+                print(f"Warning: {filename} is corrupted or empty. Starting with empty list.")
+                return []
+    return []
 
-@app.route('/save_client', methods=['POST'])
-def save_client():
-    """
-    Naya client add karta hai ya existing client ko update karta hai.
-    """
-    data = request.get_json()
-    name = data.get('name')
-    mobile_number = data.get('mobile_number')
-    email = data.get('email', '')
-    address = data.get('address', '')
+def save_data(data_list, filename):
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(data_list, f, indent=2)
 
-    if not name or not mobile_number:
-        return jsonify({"message": "Client Name and Mobile Number are required"}), 400
-
-    if mobile_number in clients_db:
-        clients_db[mobile_number].update({
-            "name": name,
-            "email": email,
-            "address": address
-        })
-        return jsonify({"message": "Client updated successfully", "client": clients_db[mobile_number]}), 200
-    else:
-        new_client = {
-            "name": name,
-            "mobile_number": mobile_number,
-            "email": email,
-            "address": address
-        }
-        clients_db[mobile_number] = new_client
-        return jsonify({"message": "Client saved successfully", "client": new_client}), 201
-
-@app.route('/clients/<mobile_number>', methods=['PUT'])
-def update_client(mobile_number):
-    """
-    Existing client ko update karta hai mobile number ke zariye.
-    """
-    data = request.get_json()
-    if mobile_number not in clients_db:
-        return jsonify({"message": "Client not found"}), 404
-
-    clients_db[mobile_number].update({
-        "name": data.get('name', clients_db[mobile_number]['name']),
-        "email": data.get('email', clients_db[mobile_number]['email']),
-        "address": data.get('address', clients_db[mobile_number]['address'])
-    })
-    return jsonify({"message": "Client updated successfully", "client": clients_db[mobile_number]}), 200
-
-@app.route('/clients/<mobile_number>', methods=['DELETE'])
-def delete_client(mobile_number):
-    """
-    Client ko delete karta hai mobile number ke zariye.
-    """
-    if mobile_number not in clients_db:
-        return jsonify({"message": "Client not found"}), 404
-    
-    del clients_db[mobile_number]
-    return jsonify({"message": "Client deleted successfully"}), 200
-
-# =============================================================================
-# Invoice Management Routes
-# =============================================================================
-
-@app.route('/invoices', methods=['GET'])
-@app.route('/dashboard/invoices', methods=['GET']) # Naya route add kiya gaya hai
-def get_invoices():
-    """
-    Invoices ki list return karta hai.
-    Agar aap asal invoices save karna chahte hain, to is function ko update karein
-    taake woh database se data fetch kare.
-    """
-    # Abhi yeh dummy data return kar raha hai.
-    # Agar aapko asal invoices chahiye, to aapko inko database mein save karna hoga
-    # aur phir yahan se fetch karna hoga.
-    return jsonify(invoices_db)
-
+# 🧾 Save invoice
 @app.route('/save_invoice', methods=['POST'])
 def save_invoice():
-    """
-    Naya invoice save karta hai.
-    """
     data = request.get_json()
-    # Yahan aap invoice data ko validate aur process kar sakte hain
-    # Misal ke taur par: invoice_no, customer_name, items, total_amount, etc.
+    try:
+        invoices = load_data(INVOICE_FILE)
+        
+        # Check if invoice_number exists and is a digit string before converting to int
+        invoice_numbers = [int(inv['invoice_number']) for inv in invoices if isinstance(inv.get('invoice_number'), str) and inv['invoice_number'].isdigit()]
+        
+        # If the invoice number from the new data already exists, assign a new one
+        if data.get('invoice_number') in [inv['invoice_number'] for inv in invoices]:
+            new_invoice_num = str(max(invoice_numbers) + 1).zfill(2) if invoice_numbers else '01'
+            data['invoice_number'] = new_invoice_num
+            print(f"Duplicate invoice number detected. Assigning new number: {new_invoice_num}")
 
-    # Abhi ke liye, hum sirf data ko invoices_db list mein add kar rahe hain.
-    # Asal mein, aapko is data ko database mein save karna hoga.
-    invoices_db.append(data)
-    return jsonify({"message": "Invoice saved successfully", "invoice": data}), 201
+        invoices.append(data)
+        save_data(invoices, INVOICE_FILE)
+        return jsonify({'status': 'success', 'message': 'Invoice saved successfully!', 'invoice_number': data.get('invoice_number')}), 200
+    except Exception as e:
+        print(f"Error saving invoice: {e}")
+        return jsonify({'error': str(e)}), 500
 
+# 📁 Get all invoices
+@app.route('/invoices', methods=['GET'])
+@app.route('/dashboard/invoices', methods=['GET']) # Frontend calls this for Saved Invoices
+def get_all_invoices():
+    try:
+        invoices = load_data(INVOICE_FILE)
+        return jsonify(invoices), 200
+    except Exception as e:
+        print(f"Error getting invoices: {e}")
+        return jsonify({'error': str(e)}), 500
 
-# =============================================================================
-# Main entry point
-# =============================================================================
+# 🗑️ Delete invoice
+@app.route('/invoices/<string:invoice_number>', methods=['DELETE'])
+def delete_invoice(invoice_number):
+    try:
+        invoices = load_data(INVOICE_FILE)
+        initial_length = len(invoices)
+        
+        updated_invoices = [inv for inv in invoices if str(inv.get('invoice_number')) != invoice_number]
+        
+        if len(updated_invoices) < initial_length:
+            save_data(updated_invoices, INVOICE_FILE)
+            return jsonify({'status': 'success', 'message': f'Invoice {invoice_number} deleted.'}), 200
+        else:
+            return jsonify({'status': 'error', 'message': f'Invoice {invoice_number} not found.'}), 404
+    except Exception as e:
+        print(f"Error deleting invoice: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# 👥 Save client
+@app.route('/save_client', methods=['POST'])
+def save_client():
+    data = request.get_json()
+    try:
+        clients = load_data(CLIENT_FILE)
+        
+        # Check for duplicate client by mobile number
+        if any(client['mobile_number'] == data['mobile_number'] for client in clients):
+            return jsonify({'status': 'error', 'message': 'Client with this mobile number already exists.'}), 409 # Conflict
+
+        clients.append(data)
+        save_data(clients, CLIENT_FILE)
+        return jsonify({'status': 'success', 'message': 'Client added successfully!'}), 200
+    except Exception as e:
+        print(f"Error saving client: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ✨ Get all clients
+@app.route('/clients', methods=['GET'])
+def get_clients():
+    try:
+        clients = load_data(CLIENT_FILE)
+        return jsonify(clients), 200
+    except Exception as e:
+        print(f"Error getting clients: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ✨ Delete client by mobile number
+@app.route('/clients/<string:mobile_number>', methods=['DELETE'])
+def delete_client(mobile_number):
+    try:
+        clients = load_data(CLIENT_FILE)
+        initial_length = len(clients)
+        
+        updated_clients = [client for client in clients if client.get('mobile_number') != mobile_number]
+        
+        if len(updated_clients) < initial_length:
+            save_data(updated_clients, CLIENT_FILE)
+            return jsonify({'status': 'success', 'message': f'Client with mobile number {mobile_number} deleted.'}), 200
+        else:
+            return jsonify({'status': 'error', 'message': f'Client with mobile number {mobile_number} not found.'}), 404
+    except Exception as e:
+        print(f"Error deleting client: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ✨ Update client by mobile number
+@app.route('/clients/<string:mobile_number>', methods=['PUT'])
+def update_client(mobile_number):
+    data = request.get_json()
+    try:
+        clients = load_data(CLIENT_FILE)
+        found = False
+        for i, client in enumerate(clients):
+            if client.get('mobile_number') == mobile_number:
+                clients[i] = {**client, **data} # Update existing client with new data
+                found = True
+                break
+        
+        if found:
+            save_data(clients, CLIENT_FILE)
+            return jsonify({'status': 'success', 'message': f'Client with mobile number {mobile_number} updated.'}), 200
+        else:
+            return jsonify({'status': 'error', 'message': f'Client with mobile number {mobile_number} not found.'}), 404
+    except Exception as e:
+        print(f"Error updating client: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ✨ Get Invoice Summary (UPDATED to include total clients)
+@app.route('/dashboard_summary', methods=['GET']) # Frontend Dashboard Overview is likely calling this
+@app.route('/invoice_summary', methods=['GET']) # Added for flexibility if frontend uses this
+def get_dashboard_summary():
+    try:
+        invoices = load_data(INVOICE_FILE)
+        clients = load_data(CLIENT_FILE) # Load clients data
+        
+        total_invoices = len(invoices)
+        total_clients = len(clients) # Calculate total clients
+        
+        total_amount_all_invoices = sum(float(inv.get('total_amount', 0)) for inv in invoices if inv.get('total_amount') is not None)
+        total_unpaid_amount = sum(float(inv.get('remaining_amount', 0)) for inv in invoices if inv.get('remaining_amount') is not None)
+        
+        summary = {
+            "total_clients": total_clients,
+            "total_invoices": total_invoices,
+            "total_paid_amount": round(total_amount_all_invoices - total_unpaid_amount, 2), # Paid amount calculation
+            "total_unpaid_amount": round(total_unpaid_amount, 2)
+        }
+        return jsonify(summary), 200
+    except Exception as e:
+        print(f"Error getting invoice summary: {e}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=5000)
+s
