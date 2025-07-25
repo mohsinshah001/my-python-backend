@@ -99,14 +99,12 @@ def add_payment_to_invoice(invoice_number):
         found = False
         for i, inv in enumerate(invoices):
             if inv.get('invoice_number') == invoice_number:
-                current_remaining = float(inv.get('remaining_amount', 0))
+                current_remaining = float(inv.get('remaining_amount', 0)) # Corrected field name
                 
                 if payment_amount > current_remaining:
                     return jsonify({'status': 'error', 'message': 'Payment amount exceeds remaining balance.'}), 400
 
                 inv['remaining_amount'] = round(current_remaining - payment_amount, 2)
-                # Agar aap paid_amount bhi track karte hain to yahan add karein
-                # inv['paid_amount'] = round(float(inv.get('paid_amount', 0)) + payment_amount, 2)
                 found = True
                 break
         
@@ -202,6 +200,7 @@ def get_dashboard_summary():
         total_clients = len(clients) # Calculate total clients
         
         total_amount_all_invoices = sum(float(inv.get('total_amount', 0)) for inv in invoices if inv.get('total_amount') is not None)
+        # Corrected: Use 'remaining_amount' for unpaid amount calculation
         total_unpaid_amount = sum(float(inv.get('remaining_amount', 0)) for inv in invoices if inv.get('remaining_amount') is not None)
         
         summary = {
