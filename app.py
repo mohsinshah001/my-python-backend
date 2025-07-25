@@ -85,6 +85,43 @@ def delete_invoice(invoice_number):
         print(f"Error deleting invoice: {e}")
         return jsonify({'error': str(e)}), 500
 
+# 💰 Add Payment to Invoice (NEW ROUTE)
+@app.route('/invoices/<string:invoice_number>/add_payment', methods=['POST'])
+def add_payment_to_invoice(invoice_number):
+    data = request.get_json()
+    payment_amount = float(data.get('payment_amount', 0))
+
+    if payment_amount <= 0:
+        return jsonify({'status': 'error', 'message': 'Payment amount must be positive.'}), 400
+
+    try:
+        invoices = load_data(INVOICE_FILE)
+        found = False
+        for i, inv in enumerate(invoices):
+            if inv.get('invoice_number') == invoice_number:
+                current_remaining = float(inv.get('remaining_amount', 0))
+                
+                if payment_amount > current_remaining:
+                    return jsonify({'status': 'error', 'message': 'Payment amount exceeds remaining balance.'}), 400
+
+                inv['remaining_amount'] = round(current_remaining - payment_amount, 2)
+                # Agar aap paid_amount bhi track karte hain to yahan add karein
+                # inv['paid_amount'] = round(float(inv.get('paid_amount', 0)) + payment_amount, 2)
+                found = True
+                break
+        
+        if found:
+            save_data(invoices, INVOICE_FILE)
+            return jsonify({'status': 'success', 'message': f'Payment added to invoice {invoice_number}.'}), 200
+        else:
+            return jsonify({'status': 'error', 'message': f'Invoice {invoice_number} not found.'}), 404
+    except ValueError:
+        return jsonify({'status': 'error', 'message': 'Invalid payment amount.'}), 400
+    except Exception as e:
+        print(f"Error adding payment: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 # 👥 Save client
 @app.route('/save_client', methods=['POST'])
 def save_client():
