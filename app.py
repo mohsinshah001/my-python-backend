@@ -7,17 +7,26 @@ app = Flask(__name__)
 # Yeh sabhi origins se requests ki ijazat dega.
 # Development ke liye yeh theek hai. Production mein, aapko specific origins set karne chahiye.
 # Misal ke taur par:
-# CORS(app, resources={r"/*": {"origins": ["[https://frontend-henna-nine-34.vercel.app](https://frontend-henna-nine-34.vercel.app)", "http://localhost:5173"]}})
-# Jahan "[https://frontend-henna-nine-34.vercel.app](https://frontend-henna-nine-34.vercel.app)" aapki Vercel frontend app ka URL hai.
+# CORS(app, resources={r"/*": {"origins": ["https://frontend-henna-nine-34.vercel.app", "http://localhost:5173"]}})
+# Jahan "https://frontend-henna-nine-34.vercel.app" aapki Vercel frontend app ka URL hai.
+# "http://localhost:5173" local development ke liye hai.
 CORS(app)
 
 # Dummy data store karne ke liye (real database ki jagah)
 # Production mein aapko MongoDB, PostgreSQL, ya koi aur database use karna hoga.
 clients_db = {}
-invoices_db = []
+# =============================================================================
+# Yahan invoices_db mein abhi dummy data hai.
+# Isko theek karne ke liye, aapko asal mein invoices ko database mein save karna hoga.
+# =============================================================================
+invoices_db = [
+    {"invoice_no": "INV-01", "customer_name": "Al Flex Art", "date": "2025-07-22", "total_amount": "4687.50", "remaining_amount": "687.50"},
+    {"invoice_no": "INV-02", "customer_name": "Client B", "date": "2025-07-20", "total_amount": "1000.00", "remaining_amount": "0.00"},
+    {"invoice_no": "INV-03", "customer_name": "Client A", "date": "2025-07-18", "total_amount": "2500.00", "remaining_amount": "500.00"}
+]
 
 # =============================================================================
-# Client Management Routes
+# Client Management Routes (Jaisa pehle tha)
 # =============================================================================
 
 @app.route('/clients', methods=['GET'])
@@ -42,7 +51,6 @@ def save_client():
         return jsonify({"message": "Client Name and Mobile Number are required"}), 400
 
     if mobile_number in clients_db:
-        # Client pehle se maujood hai, update karein
         clients_db[mobile_number].update({
             "name": name,
             "email": email,
@@ -50,7 +58,6 @@ def save_client():
         })
         return jsonify({"message": "Client updated successfully", "client": clients_db[mobile_number]}), 200
     else:
-        # Naya client add karein
         new_client = {
             "name": name,
             "mobile_number": mobile_number,
@@ -88,27 +95,40 @@ def delete_client(mobile_number):
     return jsonify({"message": "Client deleted successfully"}), 200
 
 # =============================================================================
-# Invoice Management Routes (Dummy Data)
+# Invoice Management Routes
 # =============================================================================
 
 @app.route('/invoices', methods=['GET'])
+@app.route('/dashboard/invoices', methods=['GET']) # Naya route add kiya gaya hai
 def get_invoices():
     """
-    Dummy invoices ki list return karta hai.
+    Invoices ki list return karta hai.
+    Agar aap asal invoices save karna chahte hain, to is function ko update karein
+    taake woh database se data fetch kare.
     """
-    # Dummy invoices data
-    dummy_invoices = [
-        {"invoice_no": "INV-01", "customer_name": "Al Flex Art", "date": "2025-07-22", "total_amount": "4687.50", "remaining_amount": "687.50"},
-        {"invoice_no": "INV-02", "customer_name": "Client B", "date": "2025-07-20", "total_amount": "1000.00", "remaining_amount": "0.00"},
-        {"invoice_no": "INV-03", "customer_name": "Client A", "date": "2025-07-18", "total_amount": "2500.00", "remaining_amount": "500.00"}
-    ]
-    return jsonify(dummy_invoices)
+    # Abhi yeh dummy data return kar raha hai.
+    # Agar aapko asal invoices chahiye, to aapko inko database mein save karna hoga
+    # aur phir yahan se fetch karna hoga.
+    return jsonify(invoices_db)
+
+@app.route('/save_invoice', methods=['POST'])
+def save_invoice():
+    """
+    Naya invoice save karta hai.
+    """
+    data = request.get_json()
+    # Yahan aap invoice data ko validate aur process kar sakte hain
+    # Misal ke taur par: invoice_no, customer_name, items, total_amount, etc.
+
+    # Abhi ke liye, hum sirf data ko invoices_db list mein add kar rahe hain.
+    # Asal mein, aapko is data ko database mein save karna hoga.
+    invoices_db.append(data)
+    return jsonify({"message": "Invoice saved successfully", "invoice": data}), 201
+
 
 # =============================================================================
 # Main entry point
 # =============================================================================
 
 if __name__ == '__main__':
-    # Flask app ko run karein.
-    # debug=True development ke liye theek hai, production mein False hona chahiye.
     app.run(debug=True)
