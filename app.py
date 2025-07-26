@@ -40,14 +40,28 @@ def save_invoice():
     try:
         invoices = load_data(INVOICE_FILE)
         
-        # Check if invoice_number exists and is a digit string before converting to int
-        invoice_numbers = [int(inv['invoice_number']) for inv in invoices if isinstance(inv.get('invoice_number'), str) and inv['invoice_number'].isdigit()]
+        # Extract existing invoice numbers that are digits for comparison
+        existing_invoice_numbers = [
+            inv['invoice_number'] for inv in invoices 
+            if 'invoice_number' in inv and isinstance(inv['invoice_number'], str) and inv['invoice_number'].isdigit()
+        ]
         
-        # If the invoice number from the new data already exists, assign a new one
-        if data.get('invoice_number') in [inv['invoice_number'] for inv in invoices]:
-            new_invoice_num = str(max(invoice_numbers) + 1).zfill(2) if invoice_numbers else '01'
-            data['invoice_number'] = new_invoice_num
-            print(f"Duplicate invoice number detected. Assigning new number: {new_invoice_num}")
+        # Generate a new sequential invoice number if the provided one is a duplicate or missing
+        # Also ensure 'total_amount' and 'remaining_balance' are set for new invoices
+        if 'invoice_number' not in data or data['invoice_number'] in existing_invoice_numbers:
+            # Find the highest existing numeric invoice number
+            numeric_invoice_numbers = [int(num) for num in existing_invoice_numbers]
+            next_invoice_num = 1
+            if numeric_invoice_numbers:
+                next_invoice_num = max(numeric_invoice_numbers) + 1
+            
+            # Format as '01', '02', etc.
+            data['invoice_number'] = str(next_invoice_num).zfill(2)
+            print(f"Duplicate or missing invoice number detected. Assigning new number: {data['invoice_number']}")
+
+        # Ensure total_amount and remaining_balance are floats and set for new invoices
+        data['total_amount'] = float(data.get('total_amount', 0))
+        data['remaining_balance'] = float(data.get('remaining_balance', data['total_amount'])) # Default remaining to total if not provided
 
         invoices.append(data)
         save_data(invoices, INVOICE_FILE)
@@ -85,36 +99,39 @@ def delete_invoice(invoice_number):
         print(f"Error deleting invoice: {e}")
         return jsonify({'error': str(e)}), 500
 
-# 💰 Add Payment to Invoice (NEW ROUTE)
-@app.route('/invoices/<string:invoice_number>/add_payment', methods=['POST'])
+# 💰 Add Payment to Invoice (UPDATED ROUTE)
+@app.route('/invoices/<string:invoice_number>/add_payment', methods=['PUT']) # Changed to PUT
 def add_payment_to_invoice(invoice_number):
     data = request.get_json()
-    payment_amount = float(data.get('payment_amount', 0))
+    payment_amount = float(data.get('amount_paid', 0)) # Changed from 'payment_amount' to 'amount_paid' to match frontend
 
     if payment_amount <= 0:
         return jsonify({'status': 'error', 'message': 'Payment amount must be positive.'}), 400
 
     try:
         invoices = load_data(INVOICE_FILE)
-        found = False
+        updated_invoice_data = None
         for i, inv in enumerate(invoices):
-            if inv.get('invoice_number') == invoice_number:
-                current_remaining = float(inv.get('remaining_amount', 0)) # Corrected field name
+            if str(inv.get('invoice_number')) == invoice_number:
+                current_remaining = float(inv.get('remaining_balance', 0)) # Consistent field name
+                
+                if current_remaining <= 0:
+                    return jsonify({'status': 'error', 'message': 'Invoice is already fully paid.'}), 400
                 
                 if payment_amount > current_remaining:
                     return jsonify({'status': 'error', 'message': 'Payment amount exceeds remaining balance.'}), 400
 
-                inv['remaining_amount'] = round(current_remaining - payment_amount, 2)
-                found = True
+                inv['remaining_balance'] = round(current_remaining - payment_amount, 2)
+                updated_invoice_data = inv # Store the updated invoice
                 break
         
-        if found:
+        if updated_invoice_data:
             save_data(invoices, INVOICE_FILE)
-            return jsonify({'status': 'success', 'message': f'Payment added to invoice {invoice_number}.'}), 200
+            return jsonify(updated_invoice_data), 200 # Return the updated invoice object
         else:
             return jsonify({'status': 'error', 'message': f'Invoice {invoice_number} not found.'}), 404
     except ValueError:
-        return jsonify({'status': 'error', 'message': 'Invalid payment amount.'}), 400
+        return jsonify({'status': 'error', 'message': 'Invalid payment amount format.'}), 400
     except Exception as e:
         print(f"Error adding payment: {e}")
         return jsonify({'error': str(e)}), 500
@@ -128,7 +145,7 @@ def save_client():
         clients = load_data(CLIENT_FILE)
         
         # Check for duplicate client by mobile number
-        if any(client['mobile_number'] == data['mobile_number'] for client in clients):
+        if any(client.get('mobile_number') == data.get('mobile_number') for client in clients):
             return jsonify({'status': 'error', 'message': 'Client with this mobile number already exists.'}), 409 # Conflict
 
         clients.append(data)
@@ -188,7 +205,7 @@ def update_client(mobile_number):
         print(f"Error updating client: {e}")
         return jsonify({'error': str(e)}), 500
 
-# ✨ Get Invoice Summary (UPDATED to include total clients)
+# ✨ Get Dashboard Summary
 @app.route('/dashboard_summary', methods=['GET']) # Frontend Dashboard Overview is likely calling this
 @app.route('/invoice_summary', methods=['GET']) # Added for flexibility if frontend uses this
 def get_dashboard_summary():
@@ -200,8 +217,8 @@ def get_dashboard_summary():
         total_clients = len(clients) # Calculate total clients
         
         total_amount_all_invoices = sum(float(inv.get('total_amount', 0)) for inv in invoices if inv.get('total_amount') is not None)
-        # Corrected: Use 'remaining_amount' for unpaid amount calculation
-        total_unpaid_amount = sum(float(inv.get('remaining_amount', 0)) for inv in invoices if inv.get('remaining_amount') is not None)
+        # Corrected: Use 'remaining_balance' for unpaid amount calculation
+        total_unpaid_amount = sum(float(inv.get('remaining_balance', 0)) for inv in invoices if inv.get('remaining_balance') is not None)
         
         summary = {
             "total_clients": total_clients,
